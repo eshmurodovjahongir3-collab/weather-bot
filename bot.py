@@ -316,12 +316,12 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE):
 
 # ─── MAIN ─────────────────────────────────────────────
 
-async def post_init(app):
-    await init_db()
+def main():
+    import asyncio
+    asyncio.get_event_loop().run_until_complete(init_db())
     logger.info("Database initialized")
 
-def main():
-    app = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("weather", weather_cmd))
