@@ -1,4 +1,6 @@
 import logging
+import os
+import asyncio
 from datetime import datetime, timedelta
 
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
@@ -8,7 +10,6 @@ from telegram.ext import (
 )
 from telegram.constants import ParseMode
 
-from config import TELEGRAM_TOKEN
 from database import (
     init_db, save_user, get_user, set_subscription, get_subscribers,
     add_note, get_notes, delete_note, add_reminder,
@@ -19,6 +20,9 @@ from facts import get_today_facts
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
+OPENWEATHER_KEY = os.environ.get("OPENWEATHER_KEY", "")
 
 # ─── KEYBOARDS ───────────────────────────────────────
 
@@ -174,70 +178,49 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action = context.user_data.get("action")
     section = context.user_data.get("section")
 
-    # ── Кнопки главного меню ──
     if text == "🌤 Погода":
         context.user_data["action"] = "weather"
         return await update.message.reply_text("🏙 Напиши название города:")
-
     if text == "📅 Прогноз на 5 дней":
         context.user_data["action"] = "forecast"
         return await update.message.reply_text("🏙 Напиши название города для прогноза:")
-
     if text == "📍 Моя погода":
-        return await update.message.reply_text(
-            "📍 Нажми кнопку ниже чтобы отправить геолокацию:",
-            reply_markup=location_keyboard()
-        )
-
+        return await update.message.reply_text("📍 Нажми кнопку ниже:", reply_markup=location_keyboard())
     if text == "📆 Факты дня":
         return await today_facts(update, context)
-
     if text == "📝 Заметки":
         return await notes_menu(update, context)
-
     if text == "⚙️ Настройки":
         return await update.message.reply_text("⚙️ *Настройки*", parse_mode=ParseMode.MARKDOWN, reply_markup=settings_keyboard())
-
-    # ── Кнопки заметок ──
     if text == "📋 Мои заметки":
         return await show_notes(update, context)
-
     if text == "🗑 Удалить заметку":
         context.user_data["action"] = "delete_note"
-        return await update.message.reply_text("🗑 Напиши номер заметки для удаления (например: *3*)", parse_mode=ParseMode.MARKDOWN)
-
+        return await update.message.reply_text("🗑 Напиши номер заметки для удаления:", parse_mode=ParseMode.MARKDOWN)
     if text == "⏰ Напоминание":
         context.user_data["action"] = "reminder"
         return await update.message.reply_text(
-            "⏰ Напиши напоминание в формате:\n`Текст | 14:30`\n\nНапример: `Позвонить маме | 18:00`",
+            "⏰ Напиши напоминание в формате:\n`Текст | 14:30`",
             parse_mode=ParseMode.MARKDOWN
         )
-
-    # ── Кнопки настроек ──
     if text == "🔔 Подписаться на рассылку":
         return await subscribe(update, context)
-
     if text == "🔕 Отписаться":
         return await unsubscribe(update, context)
-
     if text == "🏙 Сменить город":
         context.user_data["action"] = "change_city"
         return await update.message.reply_text("🏙 Напиши новый город:")
-
     if text == "🔙 Назад":
         context.user_data.clear()
         return await update.message.reply_text("Главное меню 👇", reply_markup=main_keyboard())
 
-    # ── Обработка действий ──
     if action == "weather":
         context.user_data.pop("action", None)
         await save_user(update.effective_user.id, text)
         await update.message.reply_text(get_weather(text), parse_mode=ParseMode.MARKDOWN)
-
     elif action == "forecast":
         context.user_data.pop("action", None)
         await update.message.reply_text(get_forecast(text), parse_mode=ParseMode.MARKDOWN)
-
     elif action == "delete_note":
         context.user_data.pop("action", None)
         try:
@@ -245,8 +228,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await delete_note(update.effective_user.id, note_id)
             await update.message.reply_text(f"✅ Заметка #{note_id} удалена.", reply_markup=notes_keyboard())
         except ValueError:
-            await update.message.reply_text("❌ Напиши только номер, например: *3*", parse_mode=ParseMode.MARKDOWN)
-
+            await update.message.reply_text("❌ Напиши только номер, например: 3")
     elif action == "reminder":
         context.user_data.pop("action", None)
         try:
@@ -265,11 +247,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=notes_keyboard()
             )
         except Exception:
-            await update.message.reply_text(
-                "❌ Неверный формат. Используй:\n`Текст | 14:30`",
-                parse_mode=ParseMode.MARKDOWN
-            )
-
+            await update.message.reply_text("❌ Используй формат:\n`Текст | 14:30`", parse_mode=ParseMode.MARKDOWN)
     elif action == "subscribe_city":
         context.user_data.pop("action", None)
         await save_user(update.effective_user.id, text)
@@ -279,16 +257,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=main_keyboard()
         )
-
     elif action == "change_city":
         context.user_data.pop("action", None)
         await save_user(update.effective_user.id, text)
         await update.message.reply_text(f"✅ Город изменён на *{text}*", parse_mode=ParseMode.MARKDOWN, reply_markup=main_keyboard())
-
     elif section == "notes":
         await add_note(update.effective_user.id, text=text)
         await update.message.reply_text("✅ Заметка сохранена!", reply_markup=notes_keyboard())
-
     else:
         await update.message.reply_text("Используй меню 👇", reply_markup=main_keyboard())
 
@@ -299,7 +274,7 @@ async def morning_broadcast(context: ContextTypes.DEFAULT_TYPE):
     facts = get_today_facts()
     for user_id, city in subscribers:
         try:
-            weather = get_weather(city) if city else "🏙 Установи город в настройках (/start)"
+            weather = get_weather(city) if city else "🏙 Установи город в настройках"
             msg = f"🌅 *Доброе утро!*\n\n{weather}\n\n{'─'*22}\n\n{facts}"
             await context.bot.send_message(user_id, msg, parse_mode=ParseMode.MARKDOWN)
         except Exception as e:
@@ -316,9 +291,8 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE):
 
 # ─── MAIN ─────────────────────────────────────────────
 
-def main():
-    import asyncio
-    asyncio.get_event_loop().run_until_complete(init_db())
+async def main():
+    await init_db()
     logger.info("Database initialized")
 
     app = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -342,7 +316,7 @@ def main():
     job_queue.run_repeating(check_reminders, interval=60)
 
     logger.info("Bot is running...")
-    app.run_polling()
+    await app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
